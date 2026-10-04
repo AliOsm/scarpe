@@ -223,6 +223,7 @@ module Scarpe
         if @target_os == "windows"
           cargo = ENV["CARGO"] || "cargo"
           env = { "RUSTFLAGS" => [ENV["RUSTFLAGS"], "-C target-feature=+crt-static"].compact.join(" ") }
+          env["CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER"] = windows_linker if windows_linker
           system(env, cargo, "build", "--release", "--locked", chdir: crate) || raise("cargo build --release failed in #{crate}")
           return
         end

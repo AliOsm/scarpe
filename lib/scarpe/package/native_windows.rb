@@ -70,8 +70,7 @@ class Scarpe::Package::Native
       args = [ENV["RUSTC"] || "rustc", File.join(TEMPLATES, "native_windows_launcher.rs"),
         "--crate-name", "scarpe_launcher", "--edition", "2021", "--target", "x86_64-pc-windows-msvc",
         "-O", "-C", "target-feature=+crt-static", "-o", windows_exe_path]
-      linker = ENV["CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER"]
-      linker ||= File.join(ENV["VCToolsInstallDir"], "bin", "Hostx64", "x64", "link.exe") if ENV["VCToolsInstallDir"]
+      linker = windows_linker
       args.concat(["-C", "linker=#{linker}"]) if linker
       if @icon
         # A fixed relative filename avoids putting user paths in resource-script source code.
@@ -91,6 +90,12 @@ class Scarpe::Package::Native
     ruby = File.join(windows_output_path, "ruby", "bin.real", "ruby.exe")
     output, status = Open3.capture2e(env, ruby, *RUBY_FLAGS, "-e", 'require "scarpe"', chdir: File.join(resources_path, "app"))
     raise "The bundled Ruby cannot load Scarpe, so the app would not start:\n#{output}" unless status.success?
+  end
+
+  # RubyInstaller puts MSYS's unrelated link.exe on PATH ahead of the MSVC linker.
+  def windows_linker
+    ENV["CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER"] ||
+      (File.join(ENV["VCToolsInstallDir"], "bin", "Hostx64", "x64", "link.exe") if ENV["VCToolsInstallDir"])
   end
 
   def run_windows_tool(*command, **options)
