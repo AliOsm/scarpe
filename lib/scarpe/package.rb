@@ -536,7 +536,9 @@ module Scarpe
     def extract_runtime
       log "📦 Extracting runtime..."
       FileUtils.mkdir_p(runtime_cache_path)
-      system("tar", "xzf", tarball_cache_path, "-C", runtime_cache_path)
+      # GNU tar (on RubyInstaller's PATH) treats the C: in an absolute Windows archive path
+      # as a remote host. Open the archive by its basename from the cache directory instead.
+      system("tar", "xzf", File.basename(tarball_cache_path), "-C", runtime_cache_path, chdir: @cache_dir)
       raise "Extraction failed!" unless $?.success?
       log "   Extracted to #{runtime_cache_path}"
     end

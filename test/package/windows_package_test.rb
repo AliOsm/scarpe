@@ -3,6 +3,8 @@
 require_relative "helper"
 require "scarpe/package"
 require "minitest/mock"
+require "rubygems/package"
+require "zlib"
 
 class WindowsPackageTest < Minitest::Test
   include PackageTestHelpers
@@ -107,6 +109,20 @@ class WindowsPackageTest < Minitest::Test
         assert_match(/Could not create Windows archive/, error.message)
       end
     end
+  end
+
+  def test_runtime_extraction_works_with_an_absolute_cache_path
+    package = packager
+    package.instance_variable_set(:@cache_dir, scratch_dir)
+    Zlib::GzipWriter.open(package.send(:tarball_cache_path)) do |gzip|
+      Gem::Package::TarWriter.new(gzip) do |tar|
+        tar.add_file_simple("runtime.txt", 0o644, 5) { |file| file.write("hello") }
+      end
+    end
+
+    package.send(:extract_runtime)
+
+    assert_equal "hello", File.read(File.join(package.send(:runtime_cache_path), "runtime.txt"))
   end
 
   def test_failed_packaging_tools_report_their_output
