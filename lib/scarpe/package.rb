@@ -2766,12 +2766,15 @@ module Scarpe
       zip_path = File.join(@output_dir, "#{@name}-#{@arch}-windows.zip")
       FileUtils.rm_f(zip_path)
 
-      # Use PowerShell's Compress-Archive on Windows, or zip on Unix
+      # Use PowerShell on Windows, or zip on Unix
       if Gem.win_platform?
-        # On Windows
+        # .NET treats both paths literally, including brackets in the destination directory.
+        # Compress-Archive can fail there even when its source uses -LiteralPath.
         source = windows_output_path.gsub("'", "''")
         destination = zip_path.gsub("'", "''")
-        ps_command = "Compress-Archive -LiteralPath '#{source}' -DestinationPath '#{destination}' -Force -ErrorAction Stop"
+        ps_command = "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression.FileSystem; " \
+          "[System.IO.Compression.ZipFile]::CreateFromDirectory('#{source}', '#{destination}', " \
+          "[System.IO.Compression.CompressionLevel]::Optimal, $true)"
         output, status = Open3.capture2e("powershell", "-NoProfile", "-NonInteractive", "-Command", ps_command)
         vlog output
         success = status.success?

@@ -84,7 +84,7 @@ class WindowsPackageTest < Minitest::Test
     end
   end
 
-  def test_windows_zip_quotes_paths_and_treats_brackets_literally
+  def test_windows_zip_passes_quoted_literal_paths_to_dotnet
     package = packager(name: "Reader's [الجامع]")
     command = nil
     fake_capture = lambda do |*args|
@@ -97,8 +97,8 @@ class WindowsPackageTest < Minitest::Test
     end
 
     assert_equal %w[powershell -NoProfile -NonInteractive -Command], command.first(4)
-    assert_includes command[4], "-LiteralPath '#{package.windows_output_path.gsub("'", "''")}'"
-    assert_includes command[4], "-ErrorAction Stop"
+    assert_includes command[4], "::CreateFromDirectory('#{package.windows_output_path.gsub("'", "''")}', "
+    assert_includes command[4], "$ErrorActionPreference = 'Stop'"
   end
 
   def test_failed_archive_creation_is_not_reported_as_success
