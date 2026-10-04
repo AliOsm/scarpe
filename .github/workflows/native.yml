@@ -94,6 +94,7 @@ jobs:
         with:
           workspaces: native
           shared-key: native-windows-package
+          cache-on-failure: true
       - uses: actions/cache@v6
         with:
           path: ~/.scarpe/packager-cache

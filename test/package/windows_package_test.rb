@@ -87,13 +87,13 @@ class WindowsPackageTest < Minitest::Test
   def test_windows_zip_quotes_paths_and_treats_brackets_literally
     package = packager(name: "Reader's [الجامع]")
     command = nil
-    fake_system = lambda do |*args|
+    fake_capture = lambda do |*args|
       command = args
       File.binwrite(File.join(package.instance_variable_get(:@output_dir), "Reader's [الجامع]-x86_64-windows.zip"), "zip")
-      true
+      ["", Struct.new(:success?).new(true)]
     end
     Gem.stub(:win_platform?, true) do
-      package.stub(:system, fake_system) { package.send(:create_windows_zip) }
+      Open3.stub(:capture2e, fake_capture) { package.send(:create_windows_zip) }
     end
 
     assert_equal %w[powershell -NoProfile -NonInteractive -Command], command.first(4)
@@ -104,9 +104,10 @@ class WindowsPackageTest < Minitest::Test
   def test_failed_archive_creation_is_not_reported_as_success
     package = packager
     Gem.stub(:win_platform?, true) do
-      package.stub(:system, false) do
+      Open3.stub(:capture2e, ["archive failed", Struct.new(:success?).new(false)]) do
         error = assert_raises(RuntimeError) { package.send(:create_windows_zip) }
         assert_match(/Could not create Windows archive/, error.message)
+        assert_match(/archive failed/, error.message)
       end
     end
   end

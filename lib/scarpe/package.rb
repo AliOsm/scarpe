@@ -2772,14 +2772,16 @@ module Scarpe
         source = windows_output_path.gsub("'", "''")
         destination = zip_path.gsub("'", "''")
         ps_command = "Compress-Archive -LiteralPath '#{source}' -DestinationPath '#{destination}' -Force -ErrorAction Stop"
-        success = system("powershell", "-NoProfile", "-NonInteractive", "-Command", ps_command, [:out, :err] => @verbose ? $stdout : File::NULL)
+        output, status = Open3.capture2e("powershell", "-NoProfile", "-NonInteractive", "-Command", ps_command)
+        vlog output
+        success = status.success?
       else
         # On macOS/Linux (cross-building)
         success = Dir.chdir(@output_dir) do
           system("zip", "-r", "-q", zip_path, File.basename(windows_output_path), [:out, :err] => @verbose ? $stdout : File::NULL)
         end
       end
-      raise "Could not create Windows archive #{zip_path}" unless success && File.file?(zip_path)
+      raise "Could not create Windows archive #{zip_path}\n#{output}" unless success && File.file?(zip_path)
 
       if File.exist?(zip_path)
         zip_size = (File.size(zip_path) / 1024.0 / 1024.0).round(1)
