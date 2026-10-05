@@ -458,6 +458,7 @@ impl Runtime {
         if settled.is_none() {
             view.layout = None;
         } else if settled != before {
+            self.validate_scrollbar_drag(app);
             self.push_layout(app);
         }
     }
@@ -517,6 +518,7 @@ impl Runtime {
         view.layout = Some(layout::layout(inputs, view.doc_root, view.size));
         self.stats.since(Phase::Layout, started);
         self.stats.mark("first_layout");
+        self.validate_scrollbar_drag(app);
         self.push_layout(app);
     }
 

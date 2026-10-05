@@ -13,6 +13,7 @@ use crate::layout::{Layout, TextBox};
 use crate::props::Id;
 use crate::protocol::Outgoing;
 use crate::runtime::{Effect, Runtime};
+use crate::scrollbar;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -319,6 +320,7 @@ pub struct ViewState {
     pub hover_items: HashSet<Id>,
     pub hover_para: Option<(Id, Option<i64>)>,
     pub pressed: Option<Press>,
+    pub(crate) scrollbar_press: Option<scrollbar::Press>,
     pub focus: Option<Id>,
     /// Focus arrived from the keyboard (tab, `focus`): buttons show their ring.
     pub focus_visible: bool,
@@ -346,6 +348,9 @@ impl ViewState {
         if self.pressed.as_ref().is_some_and(|p| gone(&p.target)) {
             self.pressed = None;
         }
+        if self.scrollbar_press.and_then(|p| p.drag).is_some_and(|d| gone(&d.id)) {
+            self.cancel_scrollbar_drag();
+        }
         if self.focus.is_some_and(|id| gone(&id)) {
             self.focus = None;
         }
@@ -357,6 +362,16 @@ impl ViewState {
         }
         self.fields.retain(|id, _| !gone(id));
         self.scroll.retain(|id, _| !gone(id));
+    }
+
+    pub(crate) fn cancel_scrollbar_drag(&mut self) {
+        if let Some(press) = &mut self.scrollbar_press {
+            press.drag = None;
+        }
+    }
+
+    fn scrollbar_held(&self) -> bool {
+        self.scrollbar_press.is_some() && self.buttons & 1 != 0
     }
 
     fn click_count(&mut self, x: f32, y: f32) -> u32 {
@@ -578,6 +593,12 @@ impl Runtime {
             }
             return;
         }
+        if view.ui.scrollbar_held() {
+            if moved {
+                self.drag_scrollbar(app, y);
+            }
+            return;
+        }
         if let Some(press) = view.ui.pressed.clone().filter(|p| p.kind == PressKind::Field) {
             if let Some(field) = view.ui.fields.get_mut(&press.target) {
                 field.drag(&mut self.text.fonts.system, x, y);
@@ -678,7 +699,13 @@ impl Runtime {
     /// App's `cursor` (Shoes 3's `app.cursor = :watch_cursor`), else the arrow.
     pub fn refresh_cursor(&mut self, app: Id) {
         let Some(view) = self.views.get(&app) else { return };
-        let over = view.ui.hover_chain.iter().find_map(|id| self.doc.get(*id).and_then(cursor_of));
+        let on_scrollbar = view.ui.scrollbar_held()
+            || view.ui.pointer.is_some_and(|(x, y)| self.scrollbar_at(app, &view.ui.hover_chain, x, y).is_some());
+        let over = if on_scrollbar {
+            Some(CursorShape::Arrow)
+        } else {
+            view.ui.hover_chain.iter().find_map(|id| self.doc.get(*id).and_then(cursor_of))
+        };
         let cursor = over
             .or_else(|| self.doc.get(app).and_then(|n| n.props.str("cursor")).and_then(CursorShape::parse))
             .unwrap_or_default();
@@ -725,6 +752,12 @@ impl Runtime {
         self.ensure_layout(app);
         self.views.get_mut(&app).expect("view").ui.buttons |= 1 << (button - 1);
         self.send_mouse_state(app);
+        if button == 1 {
+            // A fresh press also recovers from a release the window never received.
+            self.views.get_mut(&app).expect("view").ui.scrollbar_press = None;
+        } else if self.views[&app].ui.scrollbar_held() {
+            return;
+        }
         if self.modal_pointer(app, x, y, crate::dialogs::PointerPhase::Down) {
             return;
         }
@@ -734,6 +767,9 @@ impl Runtime {
         }
         let Some(hit) = self.hit(app, x, y) else { return };
         let chain = chain(&self.doc, &hit);
+        if button == 1 && self.press_scrollbar(app, &chain, x, y) {
+            return;
+        }
         let kind = match self.doc.get(hit.node) {
             Some(n) if crate::elements::disabled(n) => Kind::Unknown("disabled".into()),
             Some(n) => n.kind.clone(),
@@ -831,9 +867,24 @@ impl Runtime {
     }
 
     pub fn pointer_up(&mut self, app: Id, button: u8) {
-        let Some((x, y)) = self.views.get(&app).and_then(|v| v.ui.pointer) else { return };
-        self.views.get_mut(&app).expect("view").ui.buttons &= !(1 << (button - 1));
+        let Some(view) = self.views.get_mut(&app) else { return };
+        let captured = view.ui.scrollbar_press.is_some() && (button == 1 || view.ui.scrollbar_held());
+        view.ui.buttons &= !(1 << (button - 1));
+        if captured && button == 1 {
+            view.ui.scrollbar_press = None;
+        }
         self.send_mouse_state(app);
+        let Some((x, y)) = self.views[&app].ui.pointer else {
+            self.views.get_mut(&app).expect("view").ui.pressed = None;
+            return;
+        };
+        if captured {
+            if button == 1 {
+                let hit = self.hit(app, x, y);
+                self.update_hover(app, hit, x, y, false);
+            }
+            return;
+        }
         if self.modal_pointer(app, x, y, crate::dialogs::PointerPhase::Up) {
             return;
         }
@@ -911,6 +962,78 @@ impl Runtime {
             return;
         }
         view.ui.popup = Some(Popup::open(node, anchor, view.size, &mut self.text));
+        view.ui.cancel_scrollbar_drag();
+        self.request_redraw(app);
+    }
+
+    /// The innermost scrollbar in the hit chain wins. A covering sibling cannot reach it.
+    fn scrollbar_at(&self, app: Id, chain: &[Id], x: f32, y: f32) -> Option<(Id, scrollbar::Geometry)> {
+        let layout = self.views.get(&app)?.layout.as_ref()?;
+        chain.iter().find_map(|&id| {
+            let g = scrollbar::Geometry::for_slot(layout, id)?;
+            g.contains(x, y).then_some((id, g))
+        })
+    }
+
+    fn press_scrollbar(&mut self, app: Id, chain: &[Id], x: f32, y: f32) -> bool {
+        let Some((id, g)) = self.scrollbar_at(app, chain, x, y) else { return false };
+        let on_thumb = y >= g.thumb.y && y < g.thumb.bottom();
+        let drag = (on_thumb && g.travel() > 0.0).then_some(scrollbar::Drag { id, grab: y - g.thumb.y });
+        let ui = &mut self.views.get_mut(&app).expect("view").ui;
+        ui.scrollbar_press = Some(scrollbar::Press { drag });
+        ui.pressed = None;
+        if let Some(tip) = ui.tooltip.as_mut() {
+            tip.dismissed = true;
+        }
+        if !on_thumb {
+            let s = &self.views[&app].layout.as_ref().expect("layout").scrollers[&id];
+            let direction = if y < g.thumb.y { -1.0 } else { 1.0 };
+            self.scroll_from_pointer(app, id, s.top + direction * s.viewport.h * 0.9);
+        }
+        self.refresh_cursor(app);
+        self.request_redraw(app);
+        true
+    }
+
+    /// A hidden, removed, clipped-out or no-longer-overflowing slot cannot regain a drag.
+    pub(crate) fn validate_scrollbar_drag(&mut self, app: Id) {
+        let Some(view) = self.views.get_mut(&app) else { return };
+        let Some(press) = view.ui.scrollbar_press.as_mut() else { return };
+        if let Some(drag) = press.drag.as_mut() {
+            match view.layout.as_ref().and_then(|l| scrollbar::Geometry::for_slot(l, drag.id)).filter(|g| g.travel() > 0.0) {
+                Some(g) => drag.grab = drag.grab.min(g.thumb.h),
+                None => press.drag = None,
+            }
+        }
+    }
+
+    fn drag_scrollbar(&mut self, app: Id, y: f32) {
+        self.validate_scrollbar_drag(app);
+        let view = &self.views[&app];
+        if let Some(drag) = view.ui.scrollbar_press.and_then(|p| p.drag) {
+            if let Some(g) = view.layout.as_ref().and_then(|l| scrollbar::Geometry::for_slot(l, drag.id)) {
+                self.scroll_from_pointer(app, drag.id, g.top_at(y, drag.grab));
+            }
+        }
+    }
+
+    fn scroll_from_pointer(&mut self, app: Id, id: Id, top: f32) {
+        let Some(s) = self.views.get(&app).and_then(|v| v.layout.as_ref()).and_then(|l| l.scrollers.get(&id)) else { return };
+        let top = top.clamp(0.0, s.max_top());
+        if top != s.top {
+            self.out.send(Outgoing::Scroll { id, top: top.round() as i64 });
+            self.scroll_slot(app, id, top);
+        }
+    }
+
+    /// Focus can leave before the matching release arrives (for example, on Alt-Tab).
+    pub fn cancel_pointer_drag(&mut self, app: Id) {
+        if let Some(view) = self.views.get_mut(&app) {
+            view.ui.cancel_scrollbar_drag();
+            view.ui.pressed = None;
+            view.ui.buttons = 0;
+        }
+        self.send_mouse_state(app);
         self.request_redraw(app);
     }
 
