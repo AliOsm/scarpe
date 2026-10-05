@@ -9,14 +9,16 @@ class SelectionTest < Minitest::Test
     skip_without_real_binary
   end
 
-  def test_a_selectable_rich_paragraph_can_be_copied_with_keyboard_focus
+  def test_a_selectable_rich_paragraph_can_be_focused_from_ruby_and_copied
     run = run_real(<<~'APP', test_code: <<~'TEST')
       Shoes.app do
         @text = para "العِلْم ", strong("نورٌ"), " — e\u0301", selectable: true
         @field = edit_line
       end
     APP
-      press_key :tab
+      para.focus
+      wait_frames
+      assert_equal para.linkable_id, focused_drawable.linkable_id
       press_key :command_a
       press_key :command_c
       press_key :backspace
