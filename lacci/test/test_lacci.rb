@@ -238,6 +238,34 @@ class TestLacci < NienteTest
     assert_equal "scarpe test", File.read(clipboard_file), "the copy lands in the stub, not the real clipboard"
   end
 
+  def test_clipboard_delegates_to_a_display_that_supports_it
+    run_test_niente_code(<<~SHOES_APP, app_test_code: <<~SHOES_SPEC)
+      Shoes.app { para "test" }
+    SHOES_APP
+      app = Shoes.APPS.first
+      display = Shoes::DisplayService.display_service
+      class << display
+        attr_accessor :clipboard
+      end
+      File.write(ENV.fetch("SPEC_CLIPBOARD_FILE"), "outside the display")
+
+      assert_equal "", app.clipboard, "an unavailable clipboard reads as an empty string"
+      text = Object.new
+      def text.to_s
+        "من التطبيق"
+      end
+      assert_same text, app.public_send(:clipboard=, text), "the setter returns its original argument"
+      assert_equal "من التطبيق", display.clipboard, "the display receives a string"
+      assert_equal "من التطبيق", app.clipboard
+
+      assert_nil app.public_send(:clipboard=, nil)
+      assert_equal "", display.clipboard
+      assert_equal "", app.clipboard
+    SHOES_SPEC
+
+    assert_equal "outside the display", File.read(clipboard_file), "delegation never uses the shell clipboard"
+  end
+
   def test_shoes_builtin_returns_response
     run_test_niente_code(<<~SHOES_APP, app_test_code: <<~SHOES_SPEC)
       Shoes.app do

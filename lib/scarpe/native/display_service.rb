@@ -138,6 +138,15 @@ module Scarpe::Native
       answer(:para_caret, id: id).last
     end
 
+    # Share the text fields' clipboard: the system clipboard in a window, private headlessly.
+    def clipboard
+      answer(:clipboard).last
+    end
+
+    def clipboard=(text)
+      answer(:clipboard, text: text).last
+    end
+
     def register_font(font)
       path = Normalize.font_path(font)
       child.post(t: "font", path: path) if path

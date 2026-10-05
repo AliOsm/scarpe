@@ -1,7 +1,6 @@
 ---
-# Runner self-test: pbcopy, pbpaste and xclip read and write a file in the sandbox, never
-# the real clipboard. The first assertion stops the test before any clipboard call if the
-# runner gave no sandbox file.
+# Runner self-test: native uses a private renderer clipboard; pbcopy, pbpaste and xclip
+# use a sandbox file on other displays. Neither path touches the real clipboard.
 testability: api
 ----------- app code
 Shoes.app do
@@ -13,8 +12,14 @@ refute_nil board, "spec/run names a clipboard file for every case"
 sandbox = File.realpath(File.dirname(Dir.pwd))
 assert_equal sandbox, File.realpath(File.dirname(board)), "the file sits in this case's sandbox"
 
+File.write(board, "outside the renderer")
 find_button("Copy").trigger_click
-assert_equal "copied from the app", File.read(board), "clipboard= writes the sandbox file"
+assert_equal "copied from the app", Shoes.APPS.first.clipboard
 
-File.write(board, "put there by another program")
-assert_equal "put there by another program", Shoes.APPS.first.clipboard, "clipboard reads it back"
+if ENV["SCARPE_DISPLAY_SERVICE"] == "native"
+  assert_equal "outside the renderer", File.read(board), "headless native never uses the shell clipboard"
+else
+  assert_equal "copied from the app", File.read(board), "clipboard= writes the sandbox file"
+  File.write(board, "put there by another program")
+  assert_equal "put there by another program", Shoes.APPS.first.clipboard, "clipboard reads it back"
+end

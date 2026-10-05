@@ -45,6 +45,12 @@ impl Runtime {
                 }
                 Ok(None)
             }
+            Op::Clipboard { text } => {
+                if let Some(text) = text {
+                    self.clipboard.set(text);
+                }
+                Ok(Some(json!(self.clipboard.get())))
+            }
             Op::Layout { app } => {
                 let app = self.app_for(app).ok_or_else(no_app)?;
                 Ok(Some(self.layout_dump(app)))

@@ -545,6 +545,9 @@ class Shoes::App < Shoes::Drawable
   # Read the system clipboard contents.
   # Returns the clipboard text as a string, or "" if empty/unavailable.
   def clipboard
+    display = Shoes::DisplayService.display_service
+    return display.clipboard.to_s if display.respond_to?(:clipboard)
+
     if RUBY_PLATFORM =~ /darwin/
       `pbpaste 2>/dev/null`.to_s
     elsif RUBY_PLATFORM =~ /linux/
@@ -558,6 +561,12 @@ class Shoes::App < Shoes::Drawable
 
   # Write text to the system clipboard.
   def clipboard=(text)
+    display = Shoes::DisplayService.display_service
+    if display.respond_to?(:clipboard=)
+      display.clipboard = text.to_s
+      return text
+    end
+
     if RUBY_PLATFORM =~ /darwin/
       IO.popen("pbcopy", "w") { |p| p.write(text.to_s) }
     elsif RUBY_PLATFORM =~ /linux/

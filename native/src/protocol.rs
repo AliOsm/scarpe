@@ -74,6 +74,7 @@ pub struct DialogRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Op {
     Dialog(DialogRequest),
+    Clipboard { text: Option<String> },
     Layout { app: Option<Id> },
     Snapshot { path: String, app: Option<Id>, scale: Option<f32> },
     Click { target: Target, button: u8, app: Option<Id> },
@@ -224,6 +225,7 @@ fn op_fields(obj: &Map<String, Value>) -> Result<Op, ParseError> {
             title: s(obj, "title"),
             secret: obj.get("secret").is_some_and(|v| !matches!(v, Value::Null | Value::Bool(false))),
         }),
+        "clipboard" => Op::Clipboard { text: s(obj, "text") },
         "layout" => Op::Layout { app },
         "snapshot" => Op::Snapshot { path: required(s(obj, "path"), "path")?, app, scale: f(obj, "scale") },
         "click" => Op::Click { target: target(obj.get("target"))?, button: button(obj), app },

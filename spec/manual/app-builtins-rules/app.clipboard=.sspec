@@ -8,11 +8,15 @@ Shoes.app do
   button("Copy") { self.clipboard = "Shoes was here" }
 end
 ----------- test code
-# spec/run's pbcopy, pbpaste and xclip keep the system clipboard in this sandbox file,
-# so the case never touches the real one.
+# Inspect the renderer's private clipboard on native, or the shell stubs' sandbox file.
 board = ENV.fetch("SPEC_CLIPBOARD_FILE")
 File.write(board, "old contents")
 
 find_button("Copy").trigger_click
 
-assert_equal "Shoes was here", File.read(board), "other programs see the text on the system clipboard"
+if ENV["SCARPE_DISPLAY_SERVICE"] == "native"
+  assert_equal "Shoes was here", Shoes::DisplayService.display_service.clipboard
+  assert_equal "old contents", File.read(board), "headless native never uses the shell clipboard"
+else
+  assert_equal "Shoes was here", File.read(board), "other programs see the text on the system clipboard"
+end
