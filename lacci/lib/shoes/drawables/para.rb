@@ -17,6 +17,8 @@ class Shoes
     # text_cursor: integer character position of the caret, or nil (no cursor)
     # text_marker: integer character position of the selection anchor, or nil (no selection)
     shoes_styles :text_cursor, :text_marker
+    # Native display: let readers select and copy this paragraph without editing it.
+    shoes_styles :selectable
 
     include TextDecoration
 
