@@ -163,6 +163,16 @@ hiding the paragraph, or removing it clears its native selection state. Ordinary
 paragraphs keep their existing behavior. The programmatic `cursor` and `marker`
 properties remain independent of interactive selection.
 
+`paragraph.selected_text` reads the current selection as a plain Ruby string without touching
+the clipboard or moving focus. It returns `""` when that paragraph has no selection, has been
+removed, or the display cannot query selection. Pending text changes are applied before the
+query. This lets a context menu capture the text before opening a dialog changes focus:
+
+```ruby
+selected = paragraph.selected_text
+open_selection_menu(selected) unless selected.empty? # an app-defined menu
+```
+
 ## Screen readers
 
 Scarpe draws its own buttons, fields and text, so no control of the operating system is there to

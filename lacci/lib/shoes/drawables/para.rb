@@ -244,6 +244,14 @@ class Shoes
       Shoes::DisplayService.para_hit_cache[linkable_id]
     end
 
+    # Read the user's selection as plain text without changing selection or the clipboard.
+    # Empty when this paragraph has no selection or the display does not support querying it.
+    # @return [String]
+    def selected_text
+      display = Shoes::DisplayService.display_service
+      display.respond_to?(:para_selection) ? display.para_selection(linkable_id).to_s : ""
+    end
+
     # The top of the caret's line, measured in the slot that scrolls the para, so it compares
     # with that slot's scroll_top: Shoes 3.1's TextBlock#cursor_top, which editors keep their
     # caret in view with (ledger F14). 0 when the display cannot say.

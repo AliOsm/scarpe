@@ -52,6 +52,43 @@ fn props(h: &mut Harness, id: i64, props: Value) {
 }
 
 #[test]
+fn selection_queries_preserve_unicode_focus_and_clipboard() {
+    let text = "العِلْم نورٌ — e\u{301} and 👩‍💻\nsecond line";
+    let mut h = scene(text);
+    h.rt.clipboard.set("sentinel".into());
+    assert_eq!(h.value(json!({"op":"para_selection","id":3})), Value::Null);
+    key(&mut h, "tab");
+    key(&mut h, "command_a");
+    assert_eq!(h.value(json!({"op":"para_selection","id":3})), json!(text));
+    assert_eq!(h.rt.views[&1].ui.focus, Some(3), "reading keeps keyboard focus");
+    let at = point(&mut h, 2);
+    mouse(&mut h, "down", at, 3);
+    mouse(&mut h, "up", at, 3);
+    let focus = h.rt.views[&1].ui.focus;
+    assert_eq!(h.value(json!({"op":"para_selection","id":3})), json!(text));
+    assert_eq!(h.value(json!({"op":"para_selection","id":4})), Value::Null);
+    assert_eq!(selected(&h).as_deref(), Some(text));
+    assert_eq!(h.rt.views[&1].ui.focus, focus, "reading after a context click keeps its focus state");
+    assert_eq!(h.rt.clipboard.get(), "sentinel");
+    // No explicit flush: the query must first apply the pending text replacement.
+    h.feed(&json!({"t":"props","id":3,"props":{"text_items":["A new page"]}}).to_string());
+    assert_eq!(h.value(json!({"op":"para_selection","id":3})), Value::Null);
+    assert_eq!(h.rt.clipboard.get(), "sentinel");
+}
+
+#[test]
+fn selection_queries_observe_pending_visibility_and_selection_changes() {
+    for changes in [json!({"selectable":false}), json!({"hidden":true}), json!({"state":"disabled"})] {
+        let mut h = scene("Selected text");
+        key(&mut h, "tab");
+        key(&mut h, "control_a");
+        assert_eq!(h.value(json!({"op":"para_selection","id":3})), json!("Selected text"));
+        h.feed(&json!({"t":"props","id":3,"props":changes}).to_string());
+        assert_eq!(h.value(json!({"op":"para_selection","id":3})), Value::Null);
+    }
+}
+
+#[test]
 fn keyboard_focus_selects_and_copies_mixed_scripts_without_editing_or_swallowing_find() {
     let text = "العِلْم نورٌ — e\u{301} and 👩‍💻\nsecond line";
     let mut h = scene(text);
