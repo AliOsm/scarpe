@@ -114,6 +114,7 @@ A line Rust cannot parse is answered with a `log` warning and otherwise ignored.
 | `scroll_to` | `id`, `top` | set a scrollable slot's scroll offset (clamped at the next layout) |
 | `font` | `path` (absolute) | register a font file; family name(s) become usable |
 | `text_mode` | `mode` (`scarpe` or `shoes3`) | how text is sized and set from now on (Lacci's `Shoes.text_mode`, ledger M14): `shoes3` reads text sizes as points at 96 dpi and gives text blocks that name no face Arial; every window is laid out again. The shim sends it after `hello` when a program set it before its first window, and again whenever it changes |
+| `motion_clock` | `at` (finite nonnegative seconds, or null for real time) | freeze/travel the transition clock for deterministic tests; freeze/thaw preserves elapsed time, travel samples on the next frame |
 | `flush` | | end of a batch: Rust applies everything received, relayouts, redraws once |
 | `req` | `req` (int), `op`, op fields | request that must get exactly one `reply` with the same `req` |
 
@@ -138,6 +139,8 @@ that last ran or had input, else the first running one.
 | `para_caret` | `id` (a para's) | `{left, top, height}` of the para's caret in whole pixels, measured from the content origin of the slot that scrolls the para (the window's when none does), so `top` compares with that slot's `scroll_top`; null when the para has no `text_cursor` (ledger F14) |
 | `a11y` | `app`, `platform` (default false) | the accessibility tree as a screen reader meets it (section 12, "Screen readers"): the window's node with its `children`. Each node has `id` and `role` (AccessKit's, snake_case: `button`, `check_box`, `label`...) and, when set, `name`, `value`, `description`, `toggled`, `numeric` `{value, min, max}`, `expanded`, `selected`, `url`, `level`, `focused`, `disabled`, `read_only`, `modal`, `actions`, `bounds` `[x, y, w, h]` (window coordinates). `platform: true` in a macOS window reads what AppKit hands VoiceOver instead: `role`, `subrole`, `title`, `value`, `help`; elsewhere it is an error |
 | `a11y_action` | `id` (a node's), `action` (click focus set_value expand collapse), `value` (for set_value), `app`; or `platform: true` with `name` (an element's title) | acts on the node as a screen reader does, through the path a click or key takes; the events it causes come first. Error when the node cannot do it (disabled, readonly, no such item). `platform: true` acts through AppKit in a macOS window |
+| `transition` | `id`, `token` (unique active u64), `duration` (nonnegative seconds), `props` | null on success; errors validate the target and values before replacing any jobs |
+| `cancel_transition` | `id`, `token` | current transitionable properties for that drawable, even if its completion is already queued; missing drawable: `{}` |
 | `ping` | | `"pong"` |
 
 An unknown op, or one missing a field, gets a reply whose `error` says so.
@@ -156,6 +159,7 @@ Rust processes `req`s after an implicit flush of everything received before them
 | `resize` | `app`, `w`, `h` (Integers) | set the App's `@width`/`@height` ivars directly (no prop_change echo) |
 | `scroll` | `id`, `top` (Integer) | set the slot's `@scroll_top` directly |
 | `layout` | `app`, `rects`: `[[id, x, y, w, h, scroll_h], ...]` | `Shoes::DisplayService.layout_cache[id] = [x, y, w, h, scroll_h]` (Integer keys; the shim defines the accessor if Lacci lacks it and deletes ids on destroy). Sent after every layout pass, before its frame is presented and before the reply of any request that caused it: every laid-out node on an app's first layout, then only those whose rect changed, sorted by id. Window logical px, rounded to 1/100; `scroll_h` is a slot's content height, padding included, else `h`. Art reports its transformed box. Destroyed ids are simply not sent again (contract a; ledger A4, C5) |
+| `transition_end` | `token`, `id`, `props`, `completed` | sync Ruby properties; mark the handle inactive; call completion only when `completed` is true, after the final frame is presented. Cancel/replacement uses false; stale tokens are ignored |
 | `closed` | `app` | user closed a window: close that app, as `App#close` does (`quit {app}`, and it leaves `Shoes.APPS`), or every app if it was the last |
 | `console` | `app` | Alt-/ was pressed in that app's window (Cmd-/ on a Mac, 4.4): `Shoes.show_console` (5.6). The app hears no keypress for it |
 | `reply` | `req`, `value`, `error` (null or String), plus op extras like `cancelled` | answers a `req` |
@@ -342,6 +346,51 @@ once (its whole process group) before Ruby goes on to die of it, because a child
 never reads that EOF and a harness that follows TERM with KILL never waits out the grace. While the
 child runs, `SCARPE_NATIVE_PID_FILE` (when set) holds its pid, so a harness that had to kill Ruby
 can kill the child's group too: `spec/run` and `rake native_test` do.
+
+### Native timed transitions
+
+```ruby
+motion = panel.transition(duration: 0.2, opacity: 0.0, displace_left: 24) do
+  panel.hide
+end
+motion.active? # until completion is dispatched, cancellation, replacement, or removal
+motion.cancel  # returns the handle; repeated cancellation is harmless
+```
+
+`Drawable#transition` returns a `Shoes::Transition`. The native display supports
+`opacity`, `displace_left`, `displace_top`, and `Progress#fraction`. Values must be
+finite numbers representable as f32; opacity and fraction must be within 0..1.
+Duration is finite, nonnegative seconds (default 0.2). Unsupported properties,
+missing/detached drawables, inline text spans, and App/window transitions raise
+`ArgumentError`; other display services raise `Shoes::Error`. Animate the painted
+paragraph/shape owner where individual members do not paint separately (section 12).
+
+Rust samples cubic ease-out (`1 - (1 - elapsed / duration)^3`) using monotonic time,
+once per frame. Unset opacity starts at 1; displacement and progress fraction start
+at 0, matching rendering defaults. A job started before its app runs starts timing
+on its first frame. Real windows schedule frames at their display rate; headless
+canvases use 60 Hz. Delayed frames skip directly to their elapsed position. When no
+jobs remain, no animation wake-ups are scheduled. Ruby timers are unchanged.
+
+Replacing any property cancels that previous job's entire group; disjoint groups
+can run together. Reversals start from the last sampled values. `cancel`, explicit
+style writes, reparenting, removal, and app close suppress that job's callback.
+Cancellation preserves the last sample. Ruby getters synchronize at completion or
+cancellation, without per-frame property traffic or setter echoes; moved layout
+rects still update as frames are sampled. A manual style write takes precedence.
+
+Even zero-duration jobs complete after their final frame is painted/presented.
+The handle is inactive and its callback released before user completion code runs,
+so callbacks can safely start another transition. Callback errors use the normal
+handler error path. Cancelling before Ruby dispatches a queued completion suppresses
+it and synchronizes the final values. Transitions need the renderer's event loop
+and output pipe to keep making progress; an indefinitely stalled reader can still
+apply output backpressure.
+
+Shoes-Spec's frozen clock also freezes native transitions. `advance(seconds)`
+travels that clock, then requests a frame, enabling deterministic pixel, layout,
+and callback assertions without wall-clock sleeps. Window snapshots alone do not
+count as presenting the window; headless pictures do present their offscreen frame.
 
 ### 5.5 Programs in a process of their own (`Shoes.run_program`)
 

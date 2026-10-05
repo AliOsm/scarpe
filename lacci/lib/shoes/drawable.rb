@@ -680,6 +680,18 @@ class Shoes
       set_styles(displace_left: left, displace_top: top)
     end
 
+    # Animate numeric visual properties with the native renderer's cubic ease-out.
+    # Supports opacity, displace_left, displace_top, and Progress#fraction.
+    # Returns a Shoes::Transition; its completion block runs after the final frame.
+    # Other display services raise Shoes::Error until they support this API.
+    def transition(duration: 0.2, **properties, &complete)
+      service = Shoes::DisplayService.display_service
+      unless service.respond_to?(:transition)
+        raise Shoes::Error, "This display service does not support timed transitions"
+      end
+      service.transition(self, duration: duration, **properties, &complete)
+    end
+
     private
 
     # Sets styles the way their setters do, and tells the display in one prop_change, so it

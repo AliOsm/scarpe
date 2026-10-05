@@ -1,6 +1,7 @@
 //! The Runtime: the retained document, per-app view state and the protocol
 //! handler, shared by the window and the headless canvas.
 
+mod motion;
 mod repaint;
 mod startup;
 pub mod stats;
@@ -128,6 +129,7 @@ pub struct Runtime {
     /// rather than show half a batch.
     pub mid_batch: bool,
     pending_frames: Vec<PendingFrames>,
+    motion: motion::Motion,
     pub stats: Stats,
     /// When each node last changed, for windows that repaint only what changed.
     pub revisions: Revisions,
@@ -162,6 +164,7 @@ impl Runtime {
             exit: None,
             mid_batch: false,
             pending_frames: Vec::new(),
+            motion: motion::Motion::default(),
             stats,
             revisions: Revisions::default(),
             damage: DamageMode::from_env(),
@@ -211,10 +214,15 @@ impl Runtime {
                 self.stats.mark("ready");
             }
             Incoming::Create(c) => self.create(c),
-            Incoming::Props { id, props } => self.set_props(id, props),
+            Incoming::Props { id, props } => {
+                self.cancel_overlapping_transitions(id, &props);
+                self.set_props(id, props);
+            }
+            Incoming::MotionClock { at } => self.set_motion_clock(at),
             Incoming::Destroy { id } => self.destroy(id),
             Incoming::Reparent { id, parent, index } => {
                 self.doc.reparent(id, parent, index);
+                self.cancel_reparented_transitions();
                 self.revisions.touch(id);
                 self.invalidate();
             }
@@ -379,6 +387,7 @@ impl Runtime {
             return;
         }
         self.pictures_to_check = true;
+        self.motion.forget(&removed);
         self.revisions.forget(&removed);
         for view in self.views.values_mut() {
             view.ui.forget(&removed);
@@ -416,6 +425,7 @@ impl Runtime {
     /// app and sends `quit`.
     pub fn window_closed(&mut self, app: Id) {
         self.answer_what_waits_on(app, "window closed");
+        self.motion.forget(&[app]);
         if self.is_standalone(app) {
             // Ruby never knew this window: the dialog's answer was all it waited for.
             self.drop_standalone(app);
@@ -442,6 +452,7 @@ impl Runtime {
 
     fn close_view(&mut self, app: Id) {
         self.answer_what_waits_on(app, "app closed");
+        self.motion.forget(&[app]);
         let Some(view) = self.views.remove(&app) else { return };
         self.text.forget_layout(view.doc_root);
         let removed = self.doc.remove_app(app);
@@ -606,10 +617,12 @@ impl Runtime {
     /// None when the picture would be too large to make (limits::picture_size).
     pub fn picture(&mut self, app: Id, scale: f32) -> Option<Pixmap> {
         let (w, h) = limits::picture_size(self.views.get(&app)?.size, scale)?;
+        if self.opts.headless { self.advance_transitions(app); }
         let mut pm = Pixmap::new(w, h)?;
         self.paint_into(app, &mut pm, scale);
         if self.opts.headless {
-            self.stats.frame_shown();
+            self.frame_presented(app);
+            if let Some(view) = self.views.get_mut(&app) { view.dirty = false; }
             if self.damage == DamageMode::Check {
                 self.check_partial_repaint(app, &pm, scale);
             }
@@ -654,6 +667,7 @@ impl Runtime {
 
     /// The window presented a frame: answer `frames` requests that were waiting for it.
     pub fn frame_presented(&mut self, app: Id) {
+        for event in self.motion.presented(app) { self.out.send(event); }
         self.stats.frame_shown();
         self.stats.mark("first_present");
         let frames = self.views.get(&app).map(|v| v.frames).unwrap_or(0);
