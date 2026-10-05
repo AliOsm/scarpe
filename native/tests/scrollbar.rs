@@ -326,3 +326,31 @@ fn opening_a_popup_or_modal_cancels_the_drag_and_owns_no_stray_release() {
         assert_eq!(top(&h, 3), 0.0);
     }
 }
+
+#[test]
+fn becoming_inert_cancels_scrollbar_capture_without_reviving_it() {
+    for (inert_id, move_while_inert) in [(2, true), (3, true), (2, false), (3, false)] {
+        let mut h = scene(&[]);
+        mouse(&mut h, "down", 114.0, 30.0);
+        props(&mut h, inert_id, json!({"inert":true}));
+        if move_while_inert {
+            assert!(scrolls(&mouse(&mut h, "move", 114.0, 66.0)).is_empty());
+        }
+        assert_eq!(top(&h, 3), 0.0);
+        props(&mut h, inert_id, json!({"inert":false}));
+        assert!(scrolls(&mouse(&mut h, "move", 114.0, 80.0)).is_empty());
+        no_clicks(&mouse(&mut h, "up", 114.0, 80.0));
+        mouse(&mut h, "down", 114.0, 30.0);
+        assert_eq!(scrolls(&mouse(&mut h, "move", 114.0, 66.0)), vec![(3, 200)]);
+    }
+}
+
+#[test]
+fn reparenting_a_scroller_into_an_inert_subtree_cancels_capture() {
+    let mut h = scene(&[create(20, "Stack", 2, json!({"left":0,"top":0,"width":300,"height":200,"inert":true}))]);
+    mouse(&mut h, "down", 114.0, 30.0);
+    h.feed(r#"{"t":"reparent","id":3,"parent":20}"#);
+    props(&mut h, 20, json!({"inert":false}));
+    assert!(scrolls(&mouse(&mut h, "move", 114.0, 66.0)).is_empty());
+    no_clicks(&mouse(&mut h, "up", 114.0, 66.0));
+}

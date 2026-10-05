@@ -139,6 +139,9 @@ button or slot beneath the scrollbar does not activate. Nested scrollers use the
 scrollbar under the pointer. Releasing the button ends the drag, including outside the window;
 hiding or removing the scroller, losing window focus, or opening a menu or modal cancels it.
 
+Making a scroller or its ancestor inert cancels an active scrollbar drag permanently;
+re-enabling it requires a new press. Reparenting into an inert subtree has the same effect.
+
 ## Text sizes, and Shoes 3's text
 
 A text size is pixels: `para` is 12 px tall and `title` 34, as the manual says (ledger M14).

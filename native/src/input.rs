@@ -543,6 +543,9 @@ impl Runtime {
             if view.ui.pressed.as_ref().is_some_and(|p| p.chain.iter().any(|&id| self.doc.is_inert(id))) {
                 view.ui.pressed = None;
             }
+            if view.ui.scrollbar_press.and_then(|p| p.drag).is_some_and(|drag| self.doc.is_inert(drag.id)) {
+                view.ui.cancel_scrollbar_drag();
+            }
             if view.ui.popup.as_ref().is_some_and(|p| self.doc.is_inert(p.list_box)) {
                 view.ui.popup = None;
             }
@@ -1004,7 +1007,7 @@ impl Runtime {
     /// The innermost scrollbar in the hit chain wins. A covering sibling cannot reach it.
     fn scrollbar_at(&self, app: Id, chain: &[Id], x: f32, y: f32) -> Option<(Id, scrollbar::Geometry)> {
         let layout = self.views.get(&app)?.layout.as_ref()?;
-        chain.iter().find_map(|&id| {
+        chain.iter().filter(|&&id| !self.doc.is_inert(id)).find_map(|&id| {
             let g = scrollbar::Geometry::for_slot(layout, id)?;
             g.contains(x, y).then_some((id, g))
         })
@@ -1035,7 +1038,7 @@ impl Runtime {
         let Some(view) = self.views.get_mut(&app) else { return };
         let Some(press) = view.ui.scrollbar_press.as_mut() else { return };
         if let Some(drag) = press.drag.as_mut() {
-            match view.layout.as_ref().and_then(|l| scrollbar::Geometry::for_slot(l, drag.id)).filter(|g| g.travel() > 0.0) {
+            match view.layout.as_ref().and_then(|l| scrollbar::Geometry::for_slot(l, drag.id)).filter(|g| g.travel() > 0.0 && !self.doc.is_inert(drag.id)) {
                 Some(g) => drag.grab = drag.grab.min(g.thumb.h),
                 None => press.drag = None,
             }
