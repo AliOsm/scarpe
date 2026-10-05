@@ -73,7 +73,10 @@ fn edit_lines_report_programmatic_focus_without_duplicates() {
         (5, vec![(json!(3), json!([false]))]),
     ] {
         let messages = h.feed(&json!({"t": "focus", "id": id}).to_string());
-        assert_eq!(focus_changes(&messages), expected, "focus target: {id}");
+        // Only this EditLine's notifications belong to this regression. Other
+        // control kinds may independently gain focus callbacks.
+        let changes: Vec<_> = focus_changes(&messages).into_iter().filter(|(target, _)| *target == json!(3)).collect();
+        assert_eq!(changes, expected, "focus target: {id}");
         assert_eq!(h.value(json!({"op": "focused"})), json!(id));
     }
 }
